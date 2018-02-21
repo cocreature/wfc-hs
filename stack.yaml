@@ -1,0 +1,6 @@
+resolver: lts-10.5
+packages:
+- .
+extra-deps:
+- massiv-0.1.0.0
+- massiv-io-0.1.0.0
