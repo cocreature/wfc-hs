@@ -23,6 +23,20 @@ dependencies:
 - base >= 4.10 && < 4.11
 - massiv >= 0.1 && < 0.2
 - massiv-io >= 0.1 && < 0.2
+- MonadRandom >= 0.5 && < 0.6
+- protolude >= 0.2 && < 0.3
+
+default-extensions:
+- BangPatterns
+- DeriveFunctor
+- DeriveFoldable
+- FlexibleContexts
+- NoImplicitPrelude
+- OverloadedStrings
+- ScopedTypeVariables
+- TupleSections
+ghc-options:
+- -Wall
 
 library:
   source-dirs: src
