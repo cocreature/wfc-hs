@@ -47,7 +47,7 @@ sampleArray arr =
       i <- getRandomR (1, total)
       case findIndex (>= i) arr' of
         Nothing -> panic "sampleArray: Total has not been reached"
-        Just i -> pure i
+        Just j -> pure j
   where total = Massiv.sum arr
         arr' = scanl' (+) 0 (Massiv.toList arr)
 
@@ -103,7 +103,7 @@ entropy stationary w =
         Entropy (log (fromIntegral sum') - mainSum / fromIntegral sum')
 
 -- | Return the index with the minimal entropy.
-minEntropy :: forall m r. MonadRandom m => Array U Ix1 Int -> Array B Ix2 (Array U Ix1 Bool) -> m (EntropyResult Ix2)
+minEntropy :: MonadRandom m => Array U Ix1 Int -> Array B Ix2 (Array U Ix1 Bool) -> m (EntropyResult Ix2)
 minEntropy stationary wave = do
   (noise :: Array U Ix2 Double) <- Massiv.fromLists' Massiv.Seq <$> traverse (traverse (const getRandom)) (Massiv.toLists wave)
   let r = Massiv.ifoldlS combine Zero (Massiv.zipWith (\e n -> (n +) <$> e) (Massiv.map (entropy stationary) wave) noise)
