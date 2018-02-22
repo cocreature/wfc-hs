@@ -6,12 +6,14 @@ module Lib
 import           Protolude hiding ((<>))
 
 import           Control.Monad.Random.Class (MonadRandom, getRandom, getRandomR)
+import           Control.Monad.Writer (runWriter, tell)
 import           Data.List (elemIndex, findIndex)
-import           Data.Massiv.Array (Array, B, Ix1, Ix2, Source, U)
+import           Data.Massiv.Array (Array, B, Ix1, Ix2(..), Source, U)
 import qualified Data.Massiv.Array as Massiv
 import qualified Data.Massiv.Array.Mutable as Massiv
 import qualified Data.Massiv.Array.Unsafe as Massiv
 import           Data.Semigroup
+import qualified Data.Set as Set
 import           System.Random (Random)
 
 observe :: MonadRandom m => Array U Ix1 Int -> Array B Ix2 (Array U Ix1 Bool) -> m ObservationResult
@@ -124,3 +126,51 @@ instance Semigroup EntropyIndex where
   EntropyIndex i1 e1 <> EntropyIndex i2 e2
     | e2 < e1 = EntropyIndex i2 e2
     | otherwise = EntropyIndex i1 e1
+
+-- | `inBounds` can discard elements or transfer them, e.g., wrap around
+propagate :: Ix1 -> (Ix2 -> Maybe Ix2) -> (Ix1 -> Ix1 -> Bool) -> Ix2 -> Array B Ix2 (Array U Ix1 Bool) -> Array B Ix2 (Array U Ix1 Bool)
+propagate n inBounds agree start wave = runST $ do
+  wave' <- Massiv.thaw wave
+  let go [] visited = pure ()
+      go (p : ps) visited
+        | p `Set.member` visited = go ps visited
+        | otherwise = do
+            w1 <- Massiv.read' wave' p
+            let w1Possibilities = (map fst . filter snd . zip [0..]) (Massiv.toList w1)
+            newEntries <- for neighbors $ \q -> do
+              w2 <- Massiv.toList <$> Massiv.read' wave' p
+              let -- There is a lot of potential for optimizations here
+                  (w2', Any changed) = runWriter $ zipWithM
+                    (\t possible ->
+                      if possible
+                        then let possible' = any (agree t) w1Possibilities
+                             in tell (Any possible') >> pure possible'
+                        else pure False)
+                    [0..] w2
+              pure (if changed then Just q else Nothing)
+            go (catMaybes newEntries ++ ps) (Set.insert p visited)
+        where neighbors = mapMaybe inBounds (map (p+) offsets )
+              offsets = [x :. y | x <- [-(n-1)..n-1], y <- [-(n-1)..n-1]]
+  go [start] Set.empty
+  Massiv.unsafeFreeze Massiv.Seq wave'
+
+
+-- Overlapping
+-- 1. Build an index of colors
+-- 2. colors[sample[x][y]] is the original color at pixel (x,y)
+-- 3. iterate over all pixels (leave out the borders if not periodic)
+-- 4. `ps` is an array of length 8 holding all patterns of size NxN at the current position
+-- 5. `symmetry` limits the number of those patterns that we look at
+-- 7. `weights` stores the count for each pattern
+-- 8. `ordering` is a unique list of all patterns
+-- 9. T is the number of unique patterns
+-- 10. `patterns` is an array of size `T` with all patterns
+-- 11. `stationary` stores the count for all patterns
+-- 12. `propagator` is an array of size 2N-1×2N-1×T which stores a list of pattern that agree with a given pattern
+
+-- Overlapping/Propagate
+-- iterate the following until there is no element left:
+-- iterate over dx∈[-(N-1),N-1], dy∈[-(N-1),N-1] (if in bound, else ignore or wrap around)
+-- read propagator[N-1-dx][N-1-dy]
+-- iterate over possible patterns of neighbor and discard the ones that no longer agree
+-- if a pattern was discare
