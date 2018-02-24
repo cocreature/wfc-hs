@@ -1,6 +1,9 @@
 module Lib
     ( observe
     , ObservationResult(..)
+    , Model(..)
+    , ModelResult(..)
+    , run
     ) where
 
 import           Protolude hiding ((<>))
@@ -16,6 +19,25 @@ import           Data.Semigroup
 import qualified Data.Set as Set
 import           System.Random (Random)
 
+data Model m = Model
+  { modelObserve :: Array U Ix1 Int -> Array B Ix2 (Array U Ix1 Bool) -> m ObservationResult
+  , modelPropagate :: Ix2 -> Array B Ix2 (Array U Ix1 Bool) -> Array B Ix2 (Array U Ix1 Bool)
+  }
+
+data ModelResult
+  = ModelResult !(Array U Ix2 Ix1)
+  | ModelContradiction
+
+run :: MonadRandom m => Array U Ix1 Int -> Array B Ix2 (Array U Ix1 Bool) -> Model m -> m ModelResult
+run stationary initialWave model = go initialWave
+  where
+    go wave = do
+      obsRes <- modelObserve model stationary wave
+      case obsRes of
+        ObsContradiction -> pure ModelContradiction
+        FinalResult r -> pure (ModelResult r)
+        Step i wave' -> go (modelPropagate model i wave')
+
 observe :: MonadRandom m => Array U Ix1 Int -> Array B Ix2 (Array U Ix1 Bool) -> m ObservationResult
 observe stationary wave = do
   r <- minEntropy stationary wave
@@ -30,7 +52,7 @@ observe stationary wave = do
             w <- Massiv.thaw wave
             Massiv.write' w i newVals
             Massiv.unsafeFreeze Massiv.Seq w
-      pure (IntermediateResult wave')
+      pure (Step i wave')
   where
     findAssignment :: Array U Ix1 Bool -> Ix1
     findAssignment arr =
@@ -55,8 +77,8 @@ sampleArray arr =
 
 data ObservationResult
   = ObsContradiction -- ^ A contradiction has been found, i.e., for at least one index there is no possible assignment.
-  | FinalResult (Array U Ix2 Ix1) -- ^ For each index there is only a single assignment left which is returned
-  | IntermediateResult (Array B Ix2 (Array U Ix1 Bool))
+  | FinalResult !(Array U Ix2 Ix1) -- ^ For each index there is only a single assignment left which is returned
+  | Step !Ix2 !(Array B Ix2 (Array U Ix1 Bool))
 
 data EntropyResult a
   = Contradiction -- ^ There are no possible assignments left
