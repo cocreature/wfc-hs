@@ -140,14 +140,15 @@ propagate n inBounds agree start wave = runST $ do
             newEntries <- for neighbors $ \q -> do
               w2 <- Massiv.toList <$> Massiv.read' wave' p
               let -- There is a lot of potential for optimizations here
-                  (w2', Any changed) = runWriter $ zipWithM
+                  (w2', Any unmodified) = runWriter $ zipWithM
                     (\t possible ->
                       if possible
                         then let possible' = any (agree t) w1Possibilities
                              in tell (Any possible') >> pure possible'
                         else pure False)
                     [0..] w2
-              pure (if changed then Just q else Nothing)
+              Massiv.write' wave' p (Massiv.fromList Massiv.Seq w2')
+              pure (if unmodified then Nothing else Just q)
             go (catMaybes newEntries ++ ps) (Set.insert p visited)
         where neighbors = mapMaybe inBounds (map (p+) offsets )
               offsets = [x :. y | x <- [-(n-1)..n-1], y <- [-(n-1)..n-1]]
