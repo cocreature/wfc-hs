@@ -1,24 +1,29 @@
 module Main where
 
-import Prelude (read)
-import Protolude hiding (force, many)
+import           Prelude (read)
+import           Protolude hiding (force, many)
 
-import Control.Monad.Trans.Resource
-import Data.Conduit (ConduitT, runConduit, (.|))
-import Text.XML.Stream.Parse
-import Data.XML.Types (Event)
+import           Control.Monad.Trans.Resource
+import           Data.Conduit (ConduitT, runConduit, (.|))
+import           Data.Massiv.Array (Ix2(..), S, U)
+import           Data.Massiv.Array.IO (Image)
+import qualified Data.Massiv.Array.IO as Massiv
+import           Data.XML.Types (Event)
+import           Graphics.ColorSpace (RGB)
+import           Text.XML.Stream.Parse
+
+import qualified PCG.WaveFunctionCollapse as WFC
 
 data Overlapping = Overlapping
   { ovName :: Text
-  , ovPeriodic :: Bool
+  , ovPeriodic :: WFC.Periodic
   , ovPeriodicInput :: Bool
   , ovN :: Int
   , ovScreenshots :: Int
   , ovSymmetry :: Int
   , ovGround :: Int
   , ovLimit :: Maybe Int
-  , ovWidth :: Int
-  , ovHeight :: Int
+  , ovOutputDim :: Ix2
   } deriving (Eq, Ord, Show)
 
 data SimpleTiled = SimpleTiled
@@ -61,15 +66,14 @@ parseEntry =
       (pure . EntryOverlapping)
         (Overlapping
            name
-           periodic
+           (if periodic then WFC.Periodic else WFC.NonPeriodic)
            periodicInput
            n
            screenshots
            symmetry
            ground
            limit
-           width
-           height)
+           (width :. height))
     parseSimpleTiled = do
       name <- requireAttr "name"
       periodic <- maybe False (read . toS) <$> attr "periodic"
@@ -88,5 +92,15 @@ parseEntries = tagNoAttr "samples" (many parseEntry)
 main :: IO ()
 main = do
   entries <- runResourceT . runConduit $ parseFile def filePath .| force "entries required" parseEntries
-  traverse_ print entries
+  for_ entries $ \e ->
+    case e of
+      EntryOverlapping ov -> do
+        putStrLn ("Processing sample: " <> ovName ov)
+        img <- Massiv.readImageAuto ("samples/" <> toS (ovName ov) <> ".png")
+        let model = WFC.overlappingModel (ovN ov) (ovPeriodic ov) (ovSymmetry ov) (img :: Image U RGB Word8)
+        res <- WFC.run model (ovOutputDim ov)
+        case res of
+          WFC.ModelContradiction -> putStrLn ("Contradiction!" :: Text)
+          WFC.ModelResult img' -> Massiv.writeImage ("output/" <> toS (ovName ov) <> ".png") img'
+      EntrySimpleTiled st -> putStrLn ("Ignoring simple tiled sample: " <> stName st)
   where filePath = "samples.xml"
