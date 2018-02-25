@@ -1,4 +1,4 @@
-module Lib
+module PCG.WaveFunctionCollapse
     ( observe
     , ObservationResult(..)
     , Model(..)
@@ -6,12 +6,13 @@ module Lib
     , run
     ) where
 
-import           Protolude hiding ((<>))
+import           Protolude hiding ((<>), rotate)
 
 import           Control.Monad.Random.Class (MonadRandom, getRandom, getRandomR)
 import           Control.Monad.Writer (runWriter, tell)
 import           Data.List (elemIndex, findIndex)
-import           Data.Massiv.Array (Array, B, Ix1, Ix2(..), Source, U)
+import qualified Data.Map.Strict as Map
+import           Data.Massiv.Array (Array, B, Ix1, Ix2(..), M, Source, U)
 import qualified Data.Massiv.Array as Massiv
 import qualified Data.Massiv.Array.Mutable as Massiv
 import qualified Data.Massiv.Array.Unsafe as Massiv
@@ -150,7 +151,7 @@ instance Semigroup EntropyIndex where
     | otherwise = EntropyIndex i1 e1
 
 -- | `inBounds` can discard elements or transfer them, e.g., wrap around
-propagate :: Ix1 -> (Ix2 -> Maybe Ix2) -> (Ix1 -> Ix1 -> Bool) -> Ix2 -> Array B Ix2 (Array U Ix1 Bool) -> Array B Ix2 (Array U Ix1 Bool)
+propagate :: Ix1 -> (Ix2 -> Maybe Ix2) -> (Ix1 -> Ix1 -> Ix2 -> Bool) -> Ix2 -> Array B Ix2 (Array U Ix1 Bool) -> Array B Ix2 (Array U Ix1 Bool)
 propagate n inBounds agree start wave = runST $ do
   wave' <- Massiv.thaw wave
   let go [] visited = pure ()
@@ -165,7 +166,7 @@ propagate n inBounds agree start wave = runST $ do
                   (w2', Any unmodified) = runWriter $ zipWithM
                     (\t possible ->
                       if possible
-                        then let possible' = any (agree t) w1Possibilities
+                        then let possible' = any (\t' -> agree t t' (q - p)) w1Possibilities
                              in tell (Any possible') >> pure possible'
                         else pure False)
                     [0..] w2
@@ -177,6 +178,56 @@ propagate n inBounds agree start wave = runST $ do
   go [start] Set.empty
   Massiv.unsafeFreeze Massiv.Seq wave'
 
+data Periodic = Periodic | NonPeriodic
+
+reflect :: Massiv.Unbox a => Array U Ix2 a -> Array U Ix2 a
+reflect xs = Massiv.makeArray Massiv.Seq s (\(x :. y) -> Massiv.index' xs (sx - 1 - x :. y))
+  where s@(sx :. _) = Massiv.size xs
+
+rotate :: Massiv.Unbox a => Array U Ix2 a -> Array U Ix2 a
+rotate xs = Massiv.makeArray Massiv.Seq (sy :. sx) (\(x :. y) -> Massiv.index' xs (sy - 1 - y :. x))
+  where sx :. sy = Massiv.size xs
+
+overlappingModel :: forall a m. (Ord (Array U Ix2 a), Eq (Array M Ix2 a), Massiv.Unbox a, MonadRandom m) => Int -> Periodic -> Int -> Array U Ix2 a -> Model m
+overlappingModel n periodic symmetry image =
+  Model observe undefined
+  where smx :. smy = Massiv.size image
+        readPattern p = Massiv.makeArray Massiv.Seq (n :. n) (\i -> read (p + i))
+        patternCounts = Map.fromListWith (+) (map (\p -> (p, 1)) patterns)
+        patternArray :: Array B Ix1 (Array U Ix2 a)
+        patternArray = Massiv.fromList Massiv.Seq (Map.keys patternCounts)
+        stationary :: Array U Ix1 Int
+        stationary = Massiv.fromList Massiv.Seq (Map.elems patternCounts)
+        agree :: Ix1 -> Ix1 -> Ix2 -> Bool
+        agree pid0 pid1 (dx :. dy) =
+          Massiv.extract' (xmin :. ymin) s p0 == Massiv.extract' ((xmin :. ymin) - (dx :. dy)) s p1
+          where p0 = Massiv.index' patternArray pid0
+                p1 = Massiv.index' patternArray pid1
+                s = xmax - xmin :. ymax - ymin
+                xmin = max 0 dx
+                xmax | dx < 0 = dx + n
+                     | otherwise = n
+                ymin = max 0 dy
+                ymax | dy < 0 = dy + n
+                     | otherwise = n
+        patterns =
+          concatMap (take symmetry . patternVariations . readPattern) coordinates
+        patternVariations p0 = [p0, p1, p2, p3, p4, p5, p6, p7]
+          where p1 = reflect p0
+                p2 = rotate p0
+                p3 = reflect p2
+                p4 = rotate p2
+                p5 = reflect p4
+                p6 = rotate p4
+                p7 = rotate p6
+        coordinates =
+          case periodic of
+            Periodic -> [x :. y | x <- [0 .. smx - 1], y <- [0 .. smy - 1]]
+            NonPeriodic -> [x :. y | x <- [0 .. smx - n], y <- [0 .. smy - n]]
+        read (x :. y) =
+          case periodic of
+            Periodic -> Massiv.index' image (x `mod` smx :. y `mod` smy)
+            NonPeriodic -> Massiv.index' image (x :. y)
 
 -- Overlapping
 -- 1. Build an index of colors
