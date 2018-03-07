@@ -2,11 +2,8 @@ resolver: lts-10.5
 packages:
 - .
 extra-deps:
-- git: git@github.com:lehins/massiv.git
-  commit: 34bfc0023c2c636d1af06e58f80b953cd888ef8e
-  subdirs:
-    - massiv
-    - massiv-io
+- massiv-0.1.1.0
+- massiv-io-0.1.1.0
 - conduit-1.3.0
 - conduit-extra-1.3.0
 - xml-conduit-1.8.0
