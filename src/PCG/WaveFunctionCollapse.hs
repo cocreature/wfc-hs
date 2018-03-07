@@ -12,7 +12,7 @@ import           Control.Monad.Random.Class (MonadRandom, getRandom, getRandomR)
 import           Control.Monad.Writer (runWriter, tell)
 import           Data.List (elemIndex, findIndex)
 import qualified Data.Map.Strict as Map
-import           Data.Massiv.Array (Array, B, Ix1, Ix3, Ix2(..), IxN(..), M, Source, U)
+import           Data.Massiv.Array (Array, B, Ix1, Ix3, Ix2(..), IxN(..), Source, U)
 import qualified Data.Massiv.Array as Massiv
 import qualified Data.Massiv.Array.Mutable as Massiv
 import qualified Data.Massiv.Array.Unsafe as Massiv
@@ -31,6 +31,7 @@ data ModelResult a
   = ModelResult !(Array U Ix2 a)
   | ModelContradiction
 
+{-# INLINABLE run #-}
 run :: MonadRandom m => Model m a -> Ix2 -> m (ModelResult a)
 run model outputDim = go initialWave
   where
@@ -46,17 +47,15 @@ run model outputDim = go initialWave
         FinalResult r -> pure (ModelResult (modelOutput model r))
         Step i wave' -> go (modelPropagate model i wave')
 
+{-# INLINABLE observe #-}
 observe :: MonadRandom m => Array U Ix1 Int -> Array B Ix2 (Array U Ix1 Bool) -> m ObservationResult
 observe stationary wave = do
   r <- minEntropy stationary wave
-  traceShowM r
   case r of
     Contradiction -> pure ObsContradiction
     Zero -> pure (FinalResult (Massiv.compute (Massiv.map findAssignment wave)))
     Entropy i -> do
       val <- sampleArray (Massiv.zipWith (\possible count -> if possible then count else 0) (wave Massiv.! i) stationary)
-      traceShowM stationary
-      traceM ("setting " <> show i <> " to " <> show val)
       let newVals = Massiv.makeArray Massiv.Seq (Massiv.size stationary) (val==)
       -- TODO we shouldn’t copy the whole array here
           wave' = runST $ do
@@ -71,6 +70,7 @@ observe stationary wave = do
         Just i -> i
         Nothing -> panic "No valid assignment left"
 
+{-# INLINABLE sampleArray #-}
 -- | Given an array of non-negative values, return a random index with
 -- probability proportional to the value at that index. If all values
 -- are zero, the index is drawn uniformly at random.
@@ -137,6 +137,7 @@ entropy stationary w =
       | otherwise ->
         Entropy (log (fromIntegral sum') - mainSum / fromIntegral sum')
 
+{-# INLINABLE minEntropy #-}
 -- | Return the index with the minimal entropy.
 minEntropy :: MonadRandom m => Array U Ix1 Int -> Array B Ix2 (Array U Ix1 Bool) -> m (EntropyResult Ix2)
 minEntropy stationary wave = do
@@ -160,6 +161,7 @@ instance Semigroup EntropyIndex where
     | e2 < e1 = EntropyIndex i2 e2
     | otherwise = EntropyIndex i1 e1
 
+{-# INLINABLE propagate #-}
 -- | `inBounds` can discard elements or transfer them, e.g., wrap around
 propagate :: Ix1 -> (Ix2 -> Ix2 -> Maybe Ix2) -> (Ix1 -> Ix1 -> Ix2 -> Bool) -> Ix2 -> Array B Ix2 (Array U Ix1 Bool) -> Array B Ix2 (Array U Ix1 Bool)
 propagate n inBounds agree start wave = runST $ do
@@ -206,6 +208,7 @@ rotate :: Massiv.Unbox a => Array U Ix2 a -> Array U Ix2 a
 rotate xs = Massiv.makeArray Massiv.Seq (sy :. sx) (\(x :. y) -> Massiv.index' xs (sy - 1 - y :. x))
   where sx :. sy = Massiv.size xs
 
+{-# INLINE overlappingModel #-}
 overlappingModel :: forall a m. (Ord a, Massiv.Unbox a, MonadRandom m) => Int -> Periodic -> Int -> Array U Ix2 a -> Model m a
 overlappingModel n periodic symmetry image =
   Model
