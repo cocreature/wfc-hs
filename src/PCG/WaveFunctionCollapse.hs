@@ -12,9 +12,8 @@ import           Control.Monad.Random.Class (MonadRandom, getRandom, getRandomR)
 import           Control.Monad.Writer (runWriter, tell)
 import           Data.List (elemIndex, findIndex)
 import qualified Data.Map.Strict as Map
-import           Data.Massiv.Array (Array, B, Ix1, Ix3, Ix2(..), IxN(..), Source, U)
+import           Data.Massiv.Array (Array, Ix1, Ix3, Ix2(..), IxN(..), Source, B(..), U)
 import qualified Data.Massiv.Array as Massiv
-import qualified Data.Massiv.Array.Mutable as Massiv
 import qualified Data.Massiv.Array.Unsafe as Massiv
 import           Data.Semigroup
 import qualified Data.Set as Set
@@ -141,8 +140,8 @@ entropy stationary w =
 -- | Return the index with the minimal entropy.
 minEntropy :: MonadRandom m => Array U Ix1 Int -> Array B Ix2 (Array U Ix1 Bool) -> m (EntropyResult Ix2)
 minEntropy stationary wave = do
-  (noise :: Array U Ix2 Double) <- Massiv.fromLists' Massiv.Seq <$> traverse (traverse (const getRandom)) (Massiv.toLists wave)
-  let r = Massiv.ifoldlS combine Zero (Massiv.zipWith (\e n -> (n +) <$> e) (Massiv.map (entropy stationary) wave) noise)
+  entropies <- Massiv.mapM B (\w -> fmap (\noise -> fmap (noise +) (entropy stationary w)) getRandom) wave
+  let r = Massiv.ifoldlS combine Zero entropies
   pure (index <$> r)
   where
     combine :: EntropyResult EntropyIndex -> Ix2 -> EntropyResult Double -> EntropyResult EntropyIndex
